@@ -1,21 +1,16 @@
 Return Link Encapsulation (RLE) Implementation as defined by the ETSI TS 103 179
 
-# Build
+# Build [![Build Status](https://api.travis-ci.org/yne/rle.svg)](https://travis-ci.org/yne/rle)
 
 ```
 c99 rle.c
 ```
-# Testing
+# Testing [![Coverage](https://codecov.io/github/yne/rle/coverage.svg?branch=master)](https://codecov.io/github/yne/rle?branch=master)
 
 ```
 c99 rle.test.c
 ./rle.test
 ```
-
-# Quality
-
-TODO Travis
-TODO Coverage
 
 # Documentation
 

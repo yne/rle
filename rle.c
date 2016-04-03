@@ -12,6 +12,16 @@ There is 4 kinds of PPDU:
 **/
 uint16_t proto_list[0x100];
 uint8_t proto_list_rev[0x10000];
+#define ALL_PROTO\
+            PROTO(0x00,0x0000)\
+            PROTO(0x01,0x0001)\
+            PROTO(0x02,0x0002)\
+            PROTO(0x03,0x0003)\
+            PROTO(0x04,0x00C8)\
+            PROTO(0x05,0x0100)\
+            PROTO(0x0D,0x0800)\
+            PROTO(0x11,0x86DD)\
+            PROTO(0x42,0x0082)
 
 /* Common function/macro */
 
@@ -34,6 +44,7 @@ uint32_t crc(uint8_t*buffer, int size, uint32_t accu){
 
 #define APPEND(buf,elem,elem_len) memcpy((void*)((uint8_t*)buf)+(buf##_length), (void*)(elem), elem_len)
 #define MIN(A, B) ((A)<(B)?(A):(B))
+
 int rle_init(){
 	for (int i = 0; i < 256; ++i){
 		crc_tab[i] = i << 24;
@@ -42,27 +53,13 @@ int rle_init(){
 	}
 
 	memset(proto_list,~0,sizeof(proto_list));
-	proto_list[0x00]=0x0000;
-	proto_list[0x01]=0x0001;
-	proto_list[0x02]=0x0002;
-	proto_list[0x03]=0x0003;
-	proto_list[0x04]=0x00C8;
-	proto_list[0x05]=0x0100;
-	proto_list[0x0D]=0x0800;
-	proto_list[0x11]=0x86DD;
-	proto_list[0x42]=0x0082;
-
 	memset(proto_list_rev,~0,sizeof(proto_list));
-	proto_list_rev[0x0000]=0x00;
-	proto_list_rev[0x0001]=0x01;
-	proto_list_rev[0x0002]=0x02;
-	proto_list_rev[0x0003]=0x03;
-	proto_list_rev[0x00C8]=0x04;
-	proto_list_rev[0x0082]=0x42;
-	proto_list_rev[0x0100]=0x05;
-	proto_list_rev[0x0800]=0x0D;
-	proto_list_rev[0x86DD]=0x11;
-
+	#define PROTO(COMP,FULL) proto_list[COMP]=FULL;
+		ALL_PROTO;
+	#undef PROTO
+	#define PROTO(COMP,FULL) proto_list_rev[FULL]=COMP;
+		ALL_PROTO;
+	#undef PROTO
 }
 int rle_encap(rle_profile*profile, size_t sdu_len, uint8_t*sdu, uint16_t protocol_type, rle_fpdu*fpdu){
 	// See table 5.1
@@ -147,3 +144,12 @@ int rle_encap(rle_profile*profile, size_t sdu_len, uint8_t*sdu, uint16_t protoco
 	*/
 	return 0;
 }
+
+#ifndef TESTING
+#include <stdio.h>
+int main(){
+	rle_init();
+	
+	return 0;
+}
+#endif

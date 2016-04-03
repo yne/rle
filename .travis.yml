@@ -1,0 +1,8 @@
+language: c
+compiler: gcc
+script:
+  - $CC -std=c99 -coverage rle.c -o rle -DVERSION=\"$(git describe --dirty --always --tags)\"
+  - ./rle
+  - gcov rle.c
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
