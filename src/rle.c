@@ -7,7 +7,7 @@
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define CEIL(a,b) ((a+b-1)/b)
 #define DUMP(DATA,LEN) {printf("< ");int i;for(i=0;i<LEN;i++)printf("%02X ",DATA[i]);printf(">\n");}
-#define mempush(dst,src,size) memcpy(dst,src,size);dst+=size;
+#define mempush(DST,SRC,LEN,OFF) memcpy(DST+OFF,SRC,LEN);OFF+=LEN;
 
 uint32_t crc_tab[256];
 
@@ -36,13 +36,13 @@ typedef struct __attribute__((packed)){
 	uint16_t start_indicator:1;
 	uint16_t end_indicator:1;
 	uint16_t ppdu_length:11;
-	uint16_t extra:3;/*alpdu_label_type:2 + protocol_type_suppressed:1 if COMP else fragment_id:3*/
-} Ppdu_header;
+	uint16_t extra:3;/*sdu->label_type:2 + protocol_type_suppressed:1 if COMP else fragment_id:3*/
+} ppdu_header_t;
 typedef struct __attribute__((packed)){
 	uint16_t total_length:13;/* msb is use_alpdu_crc if not profile->large_alpdu */
-	uint16_t alpdu_label_type:2;
+	uint16_t label_type:2;
 	uint16_t protocol_type_suppressed:1;
-} Ppdu_start_extra;
+} ppdu_start_t;
 
 void rle_init(){
 	/* default uncomp<->comp ptype association */
@@ -62,7 +62,7 @@ void rle_init(){
 	};
 	memset(ptype_comp,~0,sizeof(ptype_comp));
 	memset(ptype_uncomp,~0,sizeof(ptype_uncomp));
-	for(int i=0;i<sizeof(comptypes)/sizeof(*comptypes);i++){
+	for(size_t i=0;i<sizeof(comptypes)/sizeof(*comptypes);i++){
 		ptype_comp[comptypes[i].comp]=comptypes[i].full;
 		ptype_uncomp[comptypes[i].full]=comptypes[i].comp;
 	}
@@ -70,108 +70,130 @@ void rle_init(){
 	crc_init();
 }
 
-size_t rle_frag_count(size_t length, size_t avail){/*avail:how much data can be put in a non-START PPDU*/
-	return 1 + (length/(avail+1)?CEIL(length-avail+RLE_FPDU_HEADER_START_OVERHEAD,avail):0);
-}
-
-int rle_encap(rle_profile*profile,
-              uint8_t*sdu, size_t sdu_len, uint16_t protocol_type,
-              uint8_t alpdu_label_type, bool use_alpdu_crc,
-              size_t*fpdu_len, uint8_t*fpdu){
-	size_t ppdu_label_size = 0;
-	uint8_t ppdu_label_byte[15];
-	size_t fragment_id=0;
-	/* check for invalid arguments first */
-	if(profile==NULL || sdu==NULL || fpdu_len==NULL || fpdu==NULL ||
-		sdu_len>RLE_SDU_SIZE_MAX || sdu_len==0 ||
-		alpdu_label_type>=RLE_ALPDU_TYPE_COUNT
-		//TODO check profile->ppdu_max_size against ppdu_label_length
-		//profile->ppdu_max_size<RLE_PPDU_MIN_SIZE
-		){
+int rle_encap(rle_profile* profile, rle_sdu_t** sdus, rle_fpdu_t** fpdus){
+	/* TODO: find a way to specify all PPDU label*/
+	size_t ppdu_label_size=0;
+	uint8_t*ppdu_label_byte=NULL;
+	/* set the ppdu_max_size to the max if none given */
+	if(profile->ppdu_max_size == 0){
+		profile->ppdu_max_size=RLE_FPDU_SIZE_MAX;
+	}
+	/* check for invalid sdu/profile attributs */
+	if((profile->ppdu_max_size < (RLE_PPDU_HEADER_START_LEN + ppdu_label_size + RLE_FPDU_LABEL_SIZE))
+	|| (profile->ppdu_max_size > RLE_FPDU_SIZE_MAX)
+	){
+		/* TODO we can fit a start PPDU (bigest overhead) + ppdu_label + fpdu_label + frame prot in a  */
 		return -1;
 	}
-	/**
-	* ALPDU encapsulation
-	**/
 	
-	/* ALPDU header */
-	uint8_t header[RLE_PROTO_SIZE_MAX+RLE_ALPDU_LABEL_MAX];
-	uint8_t*h = header;
-	uint8_t*comp_ptype=NULL;
-	if (profile->implied_protocol_type[alpdu_label_type] != protocol_type) {
-		if (profile->protocol_type_compressed[alpdu_label_type]) {
-			comp_ptype = &ptype_uncomp[protocol_type];
-			mempush(h, comp_ptype, sizeof(*comp_ptype));
-		} else {
-			mempush(h, &protocol_type, sizeof(protocol_type));
-		}
-	}
-	mempush(h,profile->alpdu_label_byte[alpdu_label_type],profile->alpdu_label_size[alpdu_label_type]);
-	if ((comp_ptype != NULL) && (*comp_ptype == 0xff)) {
-		mempush(h, &protocol_type, sizeof(protocol_type));
-	}
-	size_t header_len = h - header;
-	memcpy(sdu - header_len, header, header_len);
-	
-	/* ALPDU footer */
-	size_t alpdu_len = header_len + sdu_len;
-	//ASSERT profile->ppdu_max_size > RLE_PPDU_HEADER_LEN + ppdu_label_size
-	size_t ppdu_size = profile->ppdu_max_size - RLE_PPDU_HEADER_LEN - ppdu_label_size;
-	/* first, try to fit into a COMP ppdu by ommiting the protection length */
-	size_t nb_frag = rle_frag_count(alpdu_len, ppdu_size);
-	//TODO ASSERT nb_frag
-	if (nb_frag > 1) {
-		if (use_alpdu_crc) {
-			uint32_t alpdu_crc = crc(sdu,sdu_len);
-			memcpy(sdu + sdu_len, &alpdu_crc, sizeof(alpdu_crc));
-		} else {
-			uint8_t alpdu_seq = 0;
-			memcpy(sdu + sdu_len, &alpdu_seq, sizeof(alpdu_seq));
-		}
-		alpdu_len += use_alpdu_crc ? sizeof(uint32_t) : sizeof(uint8_t);
-		/* update nb_frag with the new alpdu_len */
-		nb_frag = rle_frag_count(alpdu_len, ppdu_size);
-	}
-
 	/**
-	* PPDU fragmentation
+	* encapsulate all SDU into ALPDU
 	**/
-	bool protocol_type_suppressed = false;
-	size_t frag;
-	uint8_t*p = fpdu;
-	for(frag = 0 ; frag < nb_frag ; frag++){
-		profile->ppdu_max_size;
-		Ppdu_header hdr;
-		hdr.start_indicator = (frag==0);
-		hdr.end_indicator = (frag==nb_frag-1);
-		hdr.ppdu_length = ppdu_size;
-		if(hdr.start_indicator && hdr.end_indicator){
-			hdr.extra = (protocol_type_suppressed << 2) | alpdu_label_type;
-		} else {
-			hdr.extra = fragment_id;
+	for(size_t sdu_num=0; sdus[sdu_num] != NULL; sdu_num++){
+		rle_sdu_t*sdu = sdus[sdu_num];
+		if(sdu->size > RLE_SDU_SIZE_MAX){
+			return -1;
 		}
-		size_t header_len = sizeof(Ppdu_header);
-		if (hdr.start_indicator && !hdr.end_indicator) {
-			Ppdu_start_extra start_extra;
-			start_extra.total_length = alpdu_len;
-			if(!profile->large_alpdus){
-				start_extra.total_length | use_alpdu_crc << 12;
+		/* use profile defined alpdu_label if none given */
+		if(sdu->label_byte == NULL){
+			sdu->label_byte = profile->alpdu_label_byte[sdu->label_type];
+			sdu->label_size = profile->alpdu_label_size[sdu->label_type];
+		}
+		/* ALPDU header */
+		uint8_t header[RLE_ALPDU_HEADER_MAX];
+		uint8_t*comp_ptype=NULL;
+		sdu->_protocol_type_suppressed = (profile->implied_protocol_type[sdu->label_type] == sdu->protocol_type);
+		if (!sdu->_protocol_type_suppressed) {
+			if (profile->protocol_type_compressed[sdu->label_type]) {
+				comp_ptype = &ptype_uncomp[sdu->protocol_type];
+				mempush(header, comp_ptype, sizeof(*comp_ptype), sdu->_header_size);
+			} else {
+				mempush(header, &sdu->protocol_type, sizeof(sdu->protocol_type), sdu->_header_size);
 			}
-			mempush(h,ppdu_label_byte,ppdu_label_size);
-			//header_len += sizeof(start_extra) + ppdu_label_len;
 		}
-		//ppdu_data_len = profile->ppdu_max_size - header_len;
-		//mempush(p, alpdu, 1);
+		mempush(header, profile->alpdu_label_byte[sdu->label_type],profile->alpdu_label_size[sdu->label_type], sdu->_header_size);
+		if ((comp_ptype != NULL) && (*comp_ptype == 0xff)) {
+			mempush(header, &sdu->protocol_type, sizeof(sdu->protocol_type), sdu->_header_size);
+		}
+		/* write this header right before the sdu->data */
+		memcpy(sdu->data - sdu->_header_size, header, sdu->_header_size);
+		/* don't create ALPDU footer yet because we don't know if the ALPDU will be splited */
 	}
-
+	/*
+	* Fit all the ALPDU into FPDU using PPDU
+	*/
+	size_t sdu_num=0;
+	size_t fpdu_num=0;
+	while((sdus[sdu_num] != NULL) && (fpdus[fpdu_num] != NULL)){
+		rle_fpdu_t*fpdu = fpdus[fpdu_num];
+		rle_sdu_t*sdu = sdus[sdu_num];
+		size_t fpdu_remaining_size = profile->ppdu_max_size - fpdu->size - (profile->use_frame_protection?RLE_FPDU_PROT_SIZE:0) - RLE_FPDU_LABEL_SIZE;
+		size_t alpdu_len = sdu->_header_size + sdu->size + sdu->_footer_size;
+		if(sdu->_is_frag){ /* current SDU was partialy sent, continue/finish sending using CONT/END PPDU */
+			/* try to fit the whole PPDU using a END PPDU */
+			if(RLE_PPDU_HEADER_END_LEN + ppdu_label_size + (alpdu_len-sdu->_sent_size) <= fpdu_remaining_size){
+				size_t ppdu_length = RLE_PPDU_HEADER_END_LEN + ppdu_label_size + (alpdu_len-sdu->_sent_size);
+				ppdu_header_t ppdu_hdr = {RLE_PPDU_TYPE_END, ppdu_length, sdu->fragment_id};
+				mempush(fpdu->data, &ppdu_hdr, sizeof(ppdu_hdr),fpdu->size);
+				mempush(fpdu->data, ppdu_label_byte, ppdu_label_size,fpdu->size);
+				mempush(fpdu->data, sdu->data-sdu->_header_size, alpdu_len-sdu->_sent_size,fpdu->size);
+				sdu_num++;/* we are done with this SDU */
+				sdu->done=true;
+				continue;
+			}
+			/* try again, using a CONT PPDU*/
+			if(RLE_PPDU_HEADER_CONT_LEN + ppdu_label_size <= fpdu_remaining_size){
+				size_t ppdu_length = MIN(fpdu_remaining_size, RLE_PPDU_HEADER_CONT_LEN + ppdu_label_size + (alpdu_len-sdu->_sent_size));
+				ppdu_header_t ppdu_hdr = {RLE_PPDU_TYPE_END, ppdu_length, sdu->fragment_id};
+				mempush(fpdu->data, &ppdu_hdr, sizeof(ppdu_hdr),fpdu->size);
+				mempush(fpdu->data, ppdu_label_byte, ppdu_label_size,fpdu->size);
+				mempush(fpdu->data, sdu->data-sdu->_header_size, alpdu_len-sdu->_sent_size,fpdu->size);
+				continue;
+			}
+		}else{ /* First time with this SDU (not yet frag) : find out if we can fit a COMP, or a START, (or nothing) */
+			/* try to fit a COMP ppdu */
+			if (RLE_PPDU_HEADER_COMP_LEN + ppdu_label_size + alpdu_len <= fpdu_remaining_size){
+				ppdu_header_t ppdu_hdr = {RLE_PPDU_TYPE_COMP,alpdu_len + RLE_PPDU_HEADER_COMP_LEN, (sdu->_protocol_type_suppressed << 2) | sdu->label_type}; /*this kind of extra if for COMP only*/
+				mempush(fpdu->data, &ppdu_hdr, sizeof(ppdu_hdr), fpdu->size);
+				mempush(fpdu->data, ppdu_label_byte, ppdu_label_size, fpdu->size);
+				mempush(fpdu->data, sdu->data-sdu->_header_size, alpdu_len, fpdu->size);
+				sdu->_sent_size=sdu->size;/* mark the SDU as fully sent */
+				sdu_num++;/* we are done with this SDU */
+				sdu->done=true;
+				continue;
+			}
+			/* try to fit a START ppdu (protection is needed) */
+			if(RLE_PPDU_HEADER_START_LEN + ppdu_label_size <= fpdu_remaining_size) {
+				sdu->_footer_size = sdu->use_crc ? sizeof(uint32_t) : sizeof(uint8_t);
+				alpdu_len += sdu->_footer_size;
+				/* compute the protection */
+				if (sdu->use_crc) {
+					uint32_t checksum = crc(sdu->data,sdu->size);
+					memcpy(sdu + sdu->size, &checksum, sdu->_footer_size);
+				} else {
+					memcpy(sdu + sdu->size, &profile->alpdu_seq, sdu->_footer_size);
+					profile->alpdu_seq[sdu->fragment_id]++;
+				}
+				size_t ppdu_length = MIN(fpdu_remaining_size, RLE_PPDU_HEADER_START_LEN + ppdu_label_size + alpdu_len);
+				sdu->_sent_size = ppdu_length - RLE_PPDU_HEADER_START_LEN + ppdu_label_size;
+				/* now we can create the START header with the appropriate ALPDU/PPDU length */
+				ppdu_header_t ppdu_hdr = {RLE_PPDU_TYPE_START, ppdu_length, sdu->fragment_id};
+				ppdu_start_t start_hdr = {alpdu_len | (profile->large_alpdus?0:sdu->use_crc << 12),sdu->label_type,sdu->_protocol_type_suppressed};
+				mempush(fpdu->data, &ppdu_hdr      ,sizeof(ppdu_hdr), fpdu->size);
+				mempush(fpdu->data, ppdu_label_byte, ppdu_label_size, fpdu->size);
+				mempush(fpdu->data, &start_hdr,    sizeof(start_hdr), fpdu->size);
+				mempush(fpdu->data, sdu->data-sdu->_header_size, sdu->_sent_size, fpdu->size);
+				sdu->_is_frag = true; /* reminder for the next iteration */
+				continue;
+			}
+		}
+		/* nothing can fit */
+		fpdu_num++;/* try with the next FPDU*/
+	}
 	return 0;
 }
-int rle_decap(const rle_profile*profile,
-	uint8_t*fpdu, size_t fpdu_len,
-	uint16_t*protocol_type, uint8_t*alpdu_label_type, size_t*sdu_len, uint8_t*sdu){
-	if(profile==NULL || fpdu==NULL || fpdu_len>RLE_FPDU_SIZE_MAX || protocol_type==NULL || sdu_len==NULL || sdu==NULL){
-		return -1;
-	}
+
+int rle_decap(rle_profile* profile, rle_sdu_t** sdus, rle_fpdu_t** fpdus){
 	/*
 	Header*header = (Header*)fpdu;
 	uint8_t*data = fpdu + sizeof(Header);
@@ -201,35 +223,36 @@ int main(){
 	CHECK("CRC self test", crc((uint8_t*)"123456789",9) == RLE_CRC_CHECK);
 
 	/* frag */
-	size_t nb_frags[2][12]={
+	#if 0
+	size_t rle_frag_count(size_t length, size_t avail){/*avail:how much data can be put in a non-START PPDU*/
+		return 1 + (length/(avail+1)?CEIL(length-avail+sizeof(ppdu_start_t),avail):0);
+	}
+	size_t nb_frags[][12]={
 		{1,1,1,2,3,3,3,4,4,4,5,5},//label_len=0
 		{1,1,3,3,4,4,5,5,6,6,7,7},//label_len=1 (worst case)
 	};
-	size_t frag_len=5,label_len,alpdu_len;
-	for(label_len=0;label_len<(sizeof(nb_frags)/sizeof(*nb_frags));label_len++)
-		for(alpdu_len=0;alpdu_len<(sizeof(*nb_frags)/sizeof(**nb_frags));alpdu_len++)
-			CHECK("frag",rle_frag_count(alpdu_len+1,frag_len-RLE_PPDU_HEADER_LEN-label_len) == nb_frags[label_len][alpdu_len])
-
-	rle_profile profile;
-	profile.ppdu_max_size=499;
-	uint8_t buffer[RLE_RECV_SIZE];
-	uint8_t*sdu=buffer+RLE_RECV_OFFSET;
-
-	char msg[]="simple message";
-	size_t sdu_len=sizeof(msg);
-	memcpy(sdu, msg, sdu_len);
+	size_t frag_len=5;
+	for(size_t label_len=0;label_len<(sizeof(nb_frags)/sizeof(*nb_frags));label_len++)
+		for(size_t alpdu_len=0;alpdu_len<(sizeof(*nb_frags)/sizeof(**nb_frags));alpdu_len++)
+			CHECK("frag",rle_frag_count(alpdu_len+1,frag_len-RLE_PPDU_HEADER_CONT_LEN-label_len) == nb_frags[label_len][alpdu_len])
+	#endif
+	rle_profile profile={};
+	rle_sdu_t*sdus[]={
+		&(rle_sdu_t){size:5,protocol_type:0x0800,data:"super",fragment_id:4},
+		&(rle_sdu_t){size:4,protocol_type:0x0800,data:"test",label_size:15},
+		&(rle_sdu_t){size:4,protocol_type:0x0800,data:"okay"},
+		NULL
+	};
+	rle_fpdu_t*fpdus[]={
+		&(rle_fpdu_t){},
+		&(rle_fpdu_t){},
+		&(rle_fpdu_t){},
+		NULL
+	};
 	
-	uint16_t ptype=0x0800;
-	uint8_t  ltype=0;
-	bool     use_crc=true;
-	uint8_t  fpdu[RLE_FPDU_SIZE_MAX];
-	size_t   fpdu_len=0;
-
-	uint8_t  sdu_out[RLE_SDU_SIZE_MAX];
-	size_t   sdu_len_out=sizeof(sdu_out);
-	uint16_t ptype_out=~ptype; /**< ptype_out MUST be != than ptype */
-	uint8_t  ltype_out=~ltype; /**< ltype_out MUST be != than ltype */
-	
+	int ret=rle_encap(&profile, sdus, fpdus);
+	printf("encap:%i\n",ret);
+#if 0
 	/* bad args tests */
 	CHECK("encap without profile",  rle_encap(NULL    , sdu , sdu_len           , ptype, ltype, use_crc, &fpdu_len, fpdu) < 0);
 	CHECK("encap without sdu",      rle_encap(&profile, NULL, sdu_len           , ptype, ltype, use_crc, &fpdu_len, fpdu) < 0);
@@ -251,7 +274,7 @@ int main(){
 	CHECK("mirror size", sdu_len_out == sdu_len);
 	CHECK("mirror ptype", ptype_out == ptype);
 	CHECK("mirror content", memcmp(sdu, sdu_out, sdu_len_out) == 0);
-	
+#endif
 	return failed;
 }
 #endif
