@@ -8,9 +8,16 @@ c99 rle.c
 # Testing [![Coverage](https://codecov.io/github/yne/rle/coverage.svg?branch=master)](https://codecov.io/github/yne/rle?branch=master)
 
 ```
-c99 rle.test.c
-./rle.test
+./a.out
 ```
+
+# Benchmarking (AMD E-350 @ 1.6 Ghz)
+
+- small SDU (4B) encapsulation (worst case)
+	500.000 SDU/s 6.993 fpdu/s (~4MiB/s)
+
+- smal SDU decapsulation
+	TODO
 
 # Documentation
 
