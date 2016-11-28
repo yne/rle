@@ -2,7 +2,7 @@ language: c
 compiler: gcc
 script:
   - $CC -std=c99 -coverage src/rle.c -o rle -DVERSION=\"$(git describe --dirty --always --tags)\"
-  - ./rle
+  - time ./rle
   - gcov src/rle.c
 after_success:
   - bash <(curl -s https://codecov.io/bash)

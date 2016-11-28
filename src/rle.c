@@ -6,7 +6,7 @@
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
 #define CEIL(a,b) ((a+b-1)/b)
-#define DUMP(DATA,LEN) {printf("%p< ",DATA);int i;for(i=0;i<LEN;i++)printf("%02X ",((uint8_t*)DATA)[i]);printf(">\n");}
+#define DUMP(DATA,LEN) {printf("%p< ",DATA);size_t i;for(i=0;i<(size_t)LEN;i++)printf("%02X ",((uint8_t*)DATA)[i]);printf(">\n");}
 #define mempush(DST,SRC,LEN,OFF) memcpy(DST+OFF,SRC,LEN);OFF+=LEN;
 
 uint32_t crc_tab[256];
@@ -287,7 +287,7 @@ int main(){
 	rle_profile profile = {};
 	CHECK("encap", rle_encap(&profile, my_sdu_iter, my_fpdu_iter) == 0);
 	CHECK("decap", rle_decap(&profile, NULL, NULL) == 0);
-	fprintf(stderr,"fpdu:%zu (%zuMiB)\n",filled_fpdu,(filled_fpdu*profile.fpdu_max_size)>>20);
+	fprintf(stderr,"sdu:%i fpdu:%zu (%i MiB)\n",10000000, filled_fpdu,(filled_fpdu*profile.fpdu_max_size)/1000000);
 	return failed;
 }
 #endif
