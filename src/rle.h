@@ -17,21 +17,12 @@
 #define RLE_ALPDU_HEADER_MIN (RLE_ALPDU_PROTO_MIN+RLE_ALPDU_LABEL_MIN)
 #define RLE_ALPDU_FOOTER_MAX 4
 #define RLE_ALPDU_FOOTER_MIN 0
-#define RLE_PPDU_HEADER_LEN  (sizeof(ppdu_header_t))
-#define RLE_PPDU_HEADER_START_LEN (sizeof(ppdu_header_t)+sizeof(ppdu_start_t))
+#define RLE_SDU_SIZE_MAX (RLE_ALPDU_SIZE_MAX-RLE_ALPDU_HEADER_MIN-RLE_ALPDU_FOOTER_MIN)
 
-#define RLE_PPDU_TYPE_CONT  start_indicator:0,end_indicator:0
-#define RLE_PPDU_TYPE_END   start_indicator:0,end_indicator:1
-#define RLE_PPDU_TYPE_START start_indicator:1,end_indicator:0
-#define RLE_PPDU_TYPE_COMP  start_indicator:1,end_indicator:1
-
-#define RLE_PPDU_SIZE_MIN 0
-#define RLE_PPDU_SIZE_MAX 0
 #define RLE_FPDU_SIZE_MAX 599 /* User defined */
 #define RLE_FPDU_LABEL_SIZE 12 /* User defined */
 #define RLE_FPDU_PROT_SIZE 4 /* User defined */
-#define RLE_SDU_SIZE_MAX (RLE_ALPDU_SIZE_MAX-RLE_ALPDU_HEADER_MIN-RLE_ALPDU_FOOTER_MIN)
-
+//RLE_FPDU_LABEL_SIZE+RLE_FPDU_PROT_SIZE > RLE_FPDU_SIZE_MAX
 typedef struct{
 //ALPDU
 	uint16_t  implied_protocol_type[RLE_ALPDU_TYPE_COUNT];
@@ -48,8 +39,7 @@ typedef struct{
 	bool      use_explicit_payload_header_map;
 }rle_profile;
 
-typedef struct __attribute__((packed)){
-	/* the followings should be 0-memset by default */
+typedef struct{
 	size_t    size;
 	uint16_t  protocol_type;
 	uint8_t*  label_byte;
@@ -57,28 +47,26 @@ typedef struct __attribute__((packed)){
 	uint8_t   label_type:2,:6;
 	uint8_t   fragment_id:3,:5;
 	bool      use_crc;
-	bool      done;/* ==true once fully sent into FPDU */
-	/* the followings need to be ((packed)) next to each other */
+
 	uint8_t   _pre[RLE_ALPDU_HEADER_MAX];
 	uint8_t   data[RLE_SDU_SIZE_MAX];
 	uint8_t   _suf[RLE_ALPDU_FOOTER_MAX];
-	/* internals attributs (underscore-prefixed) */
-	bool      _protocol_type_suppressed;
-	size_t    _header_size;
-	size_t    _footer_size;
-	size_t    _sent_size;
-	bool      _is_frag;
-	bool      _is_alpdu;
+	struct    {/* internal attributs */
+	  bool    ptype_suppr;
+	  size_t  header_size;
+	  size_t  footer_size;
+	  size_t  alpdu_sent;
+	  bool    is_frag;
+	  bool    is_alpdu;
+	}_;
 }rle_sdu_t;
 
-typedef struct __attribute__((packed)){
+typedef struct{
 	size_t    size;
-	uint8_t   data[RLE_FPDU_SIZE_MAX];
-	size_t    _offset;
+	uint8_t   label[RLE_FPDU_LABEL_SIZE];
+	uint8_t   data[RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE];
+	uint8_t   prot[RLE_FPDU_PROT_SIZE];
 }rle_fpdu_t;
 
 typedef rle_fpdu_t*(*rle_fpdu_iter)();
 typedef rle_sdu_t *(*rle_sdu_iter )();
-
-//int rle_encap(rle_profile* profile, rle_sdu_t** sdus, rle_fpdu_t** fpdus)
-//              __attribute__((warn_unused_result, nonnull (1,2,3)));
