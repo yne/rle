@@ -7,8 +7,8 @@
 #define DUMP(DATA,LEN) {printf("%p <<< line %i\n",DATA,__LINE__);size_t i;for(i=0;i<(size_t)LEN;i++)printf("%02X ",((uint8_t*)DATA)[i]);printf(">\n");}
 #define mempush(DST,SRC,LEN,OFF) {memcpy(DST+OFF,SRC,LEN);OFF+=LEN;}
 #define mempush_(DST,SRC,LEN,OFF) {fprintf(stderr,"%i (%p<%zu<%p@%zu)",__LINE__,DST,LEN,SRC,OFF);memcpy(DST+OFF,SRC,LEN);OFF+=LEN;fprintf(stderr,"\n");}
-#define DBG(...) 
-#define DBG_(...) fprintf(stderr,__VA_ARGS__)
+#define DBG_(...) 
+#define DBG(...) fprintf(stderr,__VA_ARGS__)
 uint32_t crc_tab[256];
 
 void crc_init(){
@@ -190,7 +190,7 @@ int rle_decap(rle_profile* profile, rle_fpdu_iter next_fpdu, rle_sdu_iter next_s
 		uint16_t hdr_int = *((uint16_t*)&(fpdu->data[fpdu_offset]));
 		/* is this FPDU too small to hold some data ? or have an (impossible) 0-sized CONT is in fact... padding !*/
 		if((profile->fpdu_max_size - fpdu_offset < sizeof(ppdu_header_t) + ppdu_label_size) || (hdr_int == 0)){
-			DBG(",");//fprintf(stderr,"Exausted FPDU: %zu/%zu (hdr:%04x)\n", fpdu_offset, profile->fpdu_max_size,hdr_int);
+			//DBG(",");//fprintf(stderr,"Exausted FPDU: %zu/%zu (hdr:%04x)\n", fpdu_offset, profile->fpdu_max_size,hdr_int);
 			fpdu = next_fpdu();
 			fpdu_offset = RLE_FPDU_LABEL_SIZE+(profile->use_eplh_map?sizeof(fpdu_header_t):0);
 			continue;
@@ -239,12 +239,49 @@ int rle_decap(rle_profile* profile, rle_fpdu_iter next_fpdu, rle_sdu_iter next_s
 
 #ifndef NOMAIN
 #include <stdio.h>
-#define BUILD_CHECK(condition) ((void)sizeof(char[1-2*!(condition)]))
 
-#include "rle.lambda.c"
+#define CONTENT "l'essentiel est invisible pour les yeux"
+#define MAX_GENERATED_SDU 5
+size_t make_sdu_nb=0;
+rle_sdu_t curr_sdu = {size:sizeof(CONTENT),data:CONTENT};
+rle_sdu_t*make_sdu(){
+	memset(&curr_sdu._,0,sizeof(curr_sdu._));
+	return (make_sdu_nb++<MAX_GENERATED_SDU-1)?&curr_sdu:NULL;
+}
+
+rle_fpdu_t saved_fpdu[MAX_GENERATED_SDU*10]={};
+size_t saved_fpdu_nb = 0;
+rle_fpdu_t*save_fpdu(){
+	return (saved_fpdu_nb<MAX_GENERATED_SDU*10-1)?&saved_fpdu[saved_fpdu_nb++]:NULL;
+}
+size_t loaded_fpdu_nb = 0;
+rle_fpdu_t*load_fpdu(){
+	if(loaded_fpdu_nb<saved_fpdu_nb){
+		rle_fpdu_t*ret = &saved_fpdu[loaded_fpdu_nb];
+		loaded_fpdu_nb++;
+		return ret;
+	}
+	return NULL;
+}
+size_t diff_sdu_found=0;
+rle_sdu_t diffed_sdu = {size:0};
+rle_sdu_t*diff_sdu(){
+	if(diffed_sdu.size){//not first call
+		/* check the previously outputed SDU before sending another one */
+		if(memcmp(CONTENT,diffed_sdu.data,diffed_sdu.size)){
+			printf("%.*s\n",diffed_sdu.size,diffed_sdu.data);
+			diff_sdu_found++;
+		}
+		//DUMP(diffed_sdu.data,diffed_sdu.size)
+	}
+	memset(&diffed_sdu._,0,sizeof(diffed_sdu._));
+	return &diffed_sdu;
+}
 
 int main(){
 	#define CHECK(msg, cond) if(!(cond)){printf(msg "\n");failed=true;}
+	#define BUILD_CHECK(condition) ((void)sizeof(char[1-2*!(condition)]))
+
 	bool failed = false;
 	/* init */
 	rle_init();
@@ -265,14 +302,16 @@ int main(){
 	BUILD_CHECK(sizeof(ppdu_start2_header_t) == 2);
 	BUILD_CHECK(sizeof(fpdu_header_t) == 1);
 	
-	/* frag */
-	rle_profile profile = {fpdu_max_size:FPDU_SIZE};
-	CHECK("encap failed", rle_encap(&profile, make_sdu, save_fpdu) == 0);
-	
-	printf("SDU:%zu->FPDU:%zu\n",make_sdu_nb,saved_fpdu_nb);
-	CHECK("decap", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
-	//CHECK("decap", rle_decap(&profile, bench_fpdu, bench_sdu) == 0);
-	//fprintf(stderr,"sdu:%i fpdu:%zu (%i MiB)\n",total_sdu, filled_fpdu,(filled_fpdu*profile.fpdu_max_size)/1000000);
+	rle_profile profile = {};
+	/* endecap at multiple FPDU size */
+	for(profile.fpdu_max_size = 20; profile.fpdu_max_size < 100;profile.fpdu_max_size += 20){
+		diff_sdu_found=loaded_fpdu_nb=make_sdu_nb=saved_fpdu_nb=0;
+		memset(saved_fpdu,0,sizeof(saved_fpdu));
+		CHECK("encap", rle_encap(&profile, make_sdu, save_fpdu) == 0);
+		CHECK("decap", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
+		CHECK("diff",  diff_sdu_found==false);
+		DBG("\n");
+	}
 	return failed;
 	#undef CHECK
 }
