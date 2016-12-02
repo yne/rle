@@ -18,12 +18,34 @@
 #define RLE_ALPDU_FOOTER_MAX 4
 #define RLE_ALPDU_FOOTER_MIN 0
 #define RLE_SDU_SIZE_MAX (RLE_ALPDU_SIZE_MAX-RLE_ALPDU_HEADER_MIN-RLE_ALPDU_FOOTER_MIN)
-
+#define RLE_FPDU_PADDING 0x00
 #define RLE_FPDU_SIZE_MAX 599 /* User defined */
-#define RLE_FPDU_LABEL_SIZE 5 /* User defined */
+#define RLE_FPDU_LABEL_SIZE 8 /* User defined */
 #define RLE_FPDU_PROT_SIZE 4 /* User defined */
 #define RLE_FPDU_DATA_SIZE (RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE)
-//RLE_FPDU_LABEL_SIZE+RLE_FPDU_PROT_SIZE > RLE_FPDU_SIZE_MAX
+
+typedef struct __attribute__((packed)){
+	uint16_t start_indicator:1;
+	uint16_t end_indicator:1;
+	uint16_t ppdu_length:11;/* length of the PPDU exclusive of the two byte PPDU header and exclusive of the PPDU label*/
+	uint16_t frag_id:3;/* label_type:2 ptsuppr:1 (for comp only)*/
+} ppdu_header_t;
+typedef struct __attribute__((packed)){
+	uint16_t total_length:13;/* msb is use_alpdu_crc if not profile->large_alpdu */
+	uint16_t label_type:2;
+	uint16_t ptype_suppr:1;
+} ppdu_start2_header_t;
+typedef ppdu_header_t ppdu_start_header_t;
+typedef ppdu_header_t ppdu_cont_header_t;
+typedef ppdu_header_t ppdu_end_header_t;
+typedef ppdu_header_t ppdu_comp_header_t;
+
+
+typedef struct __attribute__((packed)){
+	uint8_t payload_len:4;
+	uint8_t ppdu_label_len:4;
+} fpdu_header_t;
+
 typedef struct{
 //ALPDU
 	uint16_t  implied_protocol_type[RLE_ALPDU_TYPE_COUNT];
@@ -37,7 +59,7 @@ typedef struct{
 	uint8_t   alpdu_seq[RLE_ALPDU_FRAGID_COUNT];
 	size_t    fpdu_max_size;
 	bool      use_frame_protection;
-	bool      use_explicit_payload_header_map;
+	bool      use_eplh_map;
 }rle_profile;
 
 typedef struct{
@@ -64,9 +86,7 @@ typedef struct{
 
 typedef struct{
 	size_t    size;
-	uint8_t   label[RLE_FPDU_LABEL_SIZE];
-	uint8_t   data[RLE_FPDU_DATA_SIZE];
-	uint8_t   prot[RLE_FPDU_PROT_SIZE];
+	uint8_t   data[RLE_FPDU_LABEL_SIZE+RLE_FPDU_DATA_SIZE+RLE_FPDU_PROT_SIZE];
 }rle_fpdu_t;
 
 typedef rle_fpdu_t*(*rle_fpdu_iter)();
