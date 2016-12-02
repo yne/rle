@@ -14,10 +14,10 @@ c99 rle.c
 # Benchmarking (AMD E-350 @ 1.6 Ghz)
 
 - small SDU (4B) encapsulation (worst case)
-	500.000 SDU/s 6.993 fpdu/s (~4MiB/s)
+  500.000 SDU/s 6.993 fpdu/s (~4MiB/s)
 
 - smal SDU decapsulation
-	TODO
+  TODO
 
 # Documentation
 

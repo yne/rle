@@ -20,8 +20,9 @@
 #define RLE_SDU_SIZE_MAX (RLE_ALPDU_SIZE_MAX-RLE_ALPDU_HEADER_MIN-RLE_ALPDU_FOOTER_MIN)
 
 #define RLE_FPDU_SIZE_MAX 599 /* User defined */
-#define RLE_FPDU_LABEL_SIZE 12 /* User defined */
+#define RLE_FPDU_LABEL_SIZE 5 /* User defined */
 #define RLE_FPDU_PROT_SIZE 4 /* User defined */
+#define RLE_FPDU_DATA_SIZE (RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE)
 //RLE_FPDU_LABEL_SIZE+RLE_FPDU_PROT_SIZE > RLE_FPDU_SIZE_MAX
 typedef struct{
 //ALPDU
@@ -64,7 +65,7 @@ typedef struct{
 typedef struct{
 	size_t    size;
 	uint8_t   label[RLE_FPDU_LABEL_SIZE];
-	uint8_t   data[RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE];
+	uint8_t   data[RLE_FPDU_DATA_SIZE];
 	uint8_t   prot[RLE_FPDU_PROT_SIZE];
 }rle_fpdu_t;
 

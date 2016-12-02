@@ -96,7 +96,6 @@ int rle_encap(rle_profile* profile, rle_sdu_iter next_sdu, rle_fpdu_iter next_fp
 		/* TODO we can fit a start PPDU (bigest overhead) + ppdu_label + fpdu_label + frame prot in a  */
 		return -1;
 	}
-	
 	rle_fpdu_t*fpdu = next_fpdu();
 	rle_sdu_t*sdu = next_sdu();
 	while (fpdu && sdu) {
@@ -148,10 +147,10 @@ int rle_encap(rle_profile* profile, rle_sdu_iter next_sdu, rle_fpdu_iter next_fp
 		* Fit current ALPDU into FPDU using PPDU
 		*/
 		if(fpdu->size > profile->fpdu_max_size){
-			fprintf(stderr,"===\n");
+			fprintf(stderr,"given fpdu size(%zu) is larger that profile max (%zu)\n",fpdu->size, profile->fpdu_max_size);
 			return -1;
 		}
-		size_t fpdu_remaining_size = profile->fpdu_max_size - fpdu->size - (profile->use_frame_protection?RLE_FPDU_PROT_SIZE:0);
+		size_t fpdu_remaining_size = profile->fpdu_max_size - (profile->use_frame_protection?RLE_FPDU_PROT_SIZE:0) - RLE_FPDU_LABEL_SIZE - fpdu->size - RLE_FPDU_PROT_SIZE;
 		size_t alpdu_len = sdu->_.header_size + sdu->size + sdu->_.footer_size;
 		if (sdu->_.is_frag == false) { /* SDU not (yet) fragged, because it's it first pass: find out if we can fit a COMP, or a START, (or nothing) */
 			if (sizeof(ppdu_comp_header_t) + ppdu_label_size + alpdu_len <= fpdu_remaining_size){
@@ -198,7 +197,7 @@ int rle_encap(rle_profile* profile, rle_sdu_iter next_sdu, rle_fpdu_iter next_fp
 			}
 		}
 		/* nothing can fit */
-		/* TODO: pad the rest with 0*/
+		memset(fpdu->data+fpdu->size,0,profile->fpdu_max_size-fpdu->size);
 		fpdu = next_fpdu();/* try with the next FPDU*/
 	}
 	return 0;
@@ -218,7 +217,7 @@ int rle_decap(rle_profile* profile, rle_fpdu_iter next_fpdu, rle_sdu_iter next_s
 			printf("ID:%i\n",ppdu_hdr->frag_id);
 		}
 		//TODO: process FPDU content
-		fpdu_offset += ppdu_hdr->ppdu_length;
+		fpdu_offset += ppdu_hdr->ppdu_length + sizeof(ppdu_header_t)+ 0/*label len*/;
 		/*can we have another FPDU header in the remaning length ?*/
 		if(profile->fpdu_max_size - fpdu_offset > 2)
 			continue;/* then we're not done yet with this FPDU */
@@ -241,25 +240,11 @@ int rle_decap(rle_profile* profile, rle_fpdu_iter next_fpdu, rle_sdu_iter next_s
 
 #ifndef NOMAIN
 #include <stdio.h>
+#define BUILD_CHECK(condition) ((void)sizeof(char[1-2*!(condition)]))
 
-size_t total_sdu    =1000*1000;
-size_t remaining_sdu=0;
+#define MAX_GENERATED_SDU 1000
+#include "rle.lambda.c"
 
-rle_sdu_t curr_sdu = {size:1500};
-rle_sdu_t*bench_sdu(){
-	remaining_sdu--;
-	if(remaining_sdu==0)
-		return NULL;
-	memset(&curr_sdu._,0,sizeof(curr_sdu._));
-	return &curr_sdu;
-}
-size_t filled_fpdu=0;
-rle_fpdu_t curr_fpdu = {};
-rle_fpdu_t*bench_fpdu(){
-	filled_fpdu++;
-	curr_fpdu.size=0;
-	return &curr_fpdu;
-}
 int main(){
 	#define CHECK(msg, cond) if(!(cond)){printf(msg "\n");failed=true;}
 	bool failed = false;
@@ -273,21 +258,23 @@ int main(){
 	CHECK("Unknown Comp value", ptype_comp[123] == 0xFFFF);
 
 	CHECK("CRC self test", crc((uint8_t*)"123456789",9) == RLE_CRC_CHECK);
-
-	CHECK("sizeof ppdu_header_t", sizeof(ppdu_header_t) == 2);
-	CHECK("sizeof ppdu_start_header_t", sizeof(ppdu_start_header_t) == 2);
-	CHECK("sizeof ppdu_cont_header_t", sizeof(ppdu_cont_header_t) == 2);
-	CHECK("sizeof ppdu_end_header_t", sizeof(ppdu_end_header_t) == 2);
-	CHECK("sizeof ppdu_comp_header_t", sizeof(ppdu_comp_header_t) == 2);
-	CHECK("sizeof ppdu_start2_header_t", sizeof(ppdu_start2_header_t) == 2);
-	CHECK("sizeof fpdu_header_t", sizeof(fpdu_header_t) == 1);
+	/* compilation check */
+	BUILD_CHECK(sizeof(ppdu_header_t) == 2);
+	BUILD_CHECK(sizeof(ppdu_start_header_t) == 2);
+	BUILD_CHECK(sizeof(ppdu_cont_header_t) == 2);
+	BUILD_CHECK(sizeof(ppdu_end_header_t) == 2);
+	BUILD_CHECK(sizeof(ppdu_comp_header_t) == 2);
+	BUILD_CHECK(sizeof(ppdu_start2_header_t) == 2);
+	BUILD_CHECK(sizeof(fpdu_header_t) == 1);
 	
 	/* frag */
-	rle_profile profile = {};
-	remaining_sdu=total_sdu;
-	CHECK("encap", rle_encap(&profile, bench_sdu, bench_fpdu) == 0);
+	rle_profile profile = {fpdu_max_size:RLE_FPDU_SIZE_MAX};
+	CHECK("encap failed", rle_encap(&profile, make_sdu, save_fpdu) == 0);
+	DUMP(saved_fpdu[0].data, saved_fpdu[0].size);
+//	CHECK("decap", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
+	
 	//CHECK("decap", rle_decap(&profile, bench_fpdu, bench_sdu) == 0);
-	fprintf(stderr,"sdu:%i fpdu:%zu (%i MiB)\n",total_sdu, filled_fpdu,(filled_fpdu*profile.fpdu_max_size)/1000000);
+	//fprintf(stderr,"sdu:%i fpdu:%zu (%i MiB)\n",total_sdu, filled_fpdu,(filled_fpdu*profile.fpdu_max_size)/1000000);
 	return failed;
 	#undef CHECK
 }
