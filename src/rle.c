@@ -248,6 +248,9 @@ rle_sdu_t*make_sdu(){
 	memset(&curr_sdu._,0,sizeof(curr_sdu._));
 	return (make_sdu_nb++<MAX_GENERATED_SDU-1)?&curr_sdu:NULL;
 }
+rle_sdu_t*make_sdu_big(){
+	return &(rle_sdu_t){size:RLE_SDU_SIZE_MAX+1,data:CONTENT};
+}
 
 rle_fpdu_t saved_fpdu[MAX_GENERATED_SDU*10]={};
 size_t saved_fpdu_nb = 0;
@@ -302,11 +305,20 @@ int main(){
 	BUILD_CHECK(sizeof(ppdu_start2_header_t) == 2);
 	BUILD_CHECK(sizeof(fpdu_header_t) == 1);
 	
-	rle_profile profile = {};
+	rle_profile profile = {};//TODO:keep fpdu_max_size=0
+	profile.fpdu_max_size=RLE_FPDU_SIZE_MAX+1;
+	CHECK("encap fpdu too big", rle_encap(&profile, make_sdu, save_fpdu) < 0);
+	profile.fpdu_max_size=sizeof(ppdu_start_header_t) /*- ppdu_label_size*/ - RLE_FPDU_LABEL_SIZE -1;
+	CHECK("encap fpdu too small", rle_encap(&profile, make_sdu, save_fpdu) < 0);
+	profile.fpdu_max_size=0;
+	CHECK("encap sdu too big", rle_encap(&profile, make_sdu_big, save_fpdu) < 0);
+	
+	
 	/* endecap at multiple FPDU size */
-	for(profile.fpdu_max_size = 20; profile.fpdu_max_size < 100;profile.fpdu_max_size += 20){
+	for(int i=0;i<5;i++){
 		diff_sdu_found=loaded_fpdu_nb=make_sdu_nb=saved_fpdu_nb=0;
 		memset(saved_fpdu,0,sizeof(saved_fpdu));
+		profile.fpdu_max_size=(i+1)*20;
 		CHECK("encap", rle_encap(&profile, make_sdu, save_fpdu) == 0);
 		CHECK("decap", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
 		CHECK("diff",  diff_sdu_found==false);
