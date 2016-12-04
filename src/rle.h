@@ -24,21 +24,34 @@
 #define RLE_FPDU_PROT_SIZE 4 /* User defined */
 #define RLE_FPDU_DATA_SIZE (RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE)
 
+typedef enum{
+	RLE_LOG_CRI,
+	RLE_LOG_ERR,
+	RLE_LOG_WRN,
+	RLE_LOG_NFO,
+	RLE_LOG_DBG,
+}rle_log_level;
+
+typedef void (*rle_log)(rle_log_level level, const char *format, ...);
+
 typedef struct{
-//ALPDU
+/* ALPDU */
 	uint16_t  implied_ptype[RLE_ALPDU_TYPE_COUNT];
 	bool      use_ptype_short[RLE_ALPDU_TYPE_COUNT];
 	bool      use_alpdu_seq;
-	bool      use_alpdu_crc;//only used when !alpdu_seq
+	bool      use_alpdu_crc;/*only used when !alpdu_seq*/
 	bool      large_alpdus;
 	size_t    alpdu_label_size[RLE_ALPDU_TYPE_COUNT];
 	uint8_t   alpdu_label_byte[RLE_ALPDU_TYPE_COUNT][RLE_ALPDU_LABEL_MAX];
-//PPDU      
-	uint8_t   alpdu_seq_send[RLE_ALPDU_FRAGID_COUNT];//TODO:use specific structure
-	uint8_t   alpdu_seq_recv[RLE_ALPDU_FRAGID_COUNT];//TODO:use specific structure
+/* PPDU */
+	uint8_t   alpdu_seq_send[RLE_ALPDU_FRAGID_COUNT];/*TODO:use specific structure*/
+	uint8_t   alpdu_seq_recv[RLE_ALPDU_FRAGID_COUNT];/*TODO:use specific structure*/
 	size_t    fpdu_max_size;
 	bool      use_frame_protection;
 	bool      use_eplh_map;
+/* General */
+	rle_log   log;
+
 }rle_profile;
 
 typedef struct{
@@ -73,6 +86,7 @@ typedef enum{
 	RLE_ITERATOR_NEXT,
 	RLE_ITERATOR_LAST,
 }rle_iterator_step;
+
 typedef rle_fpdu_t*(*rle_iterator_fpdu)(rle_iterator_step);
 typedef rle_sdu_t *(*rle_iterator_sdu )(rle_iterator_step);
 

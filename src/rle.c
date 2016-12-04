@@ -1,26 +1,29 @@
-#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
 #include "rle.h"
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
-#define DUMP(DATA,LEN) {printf("%p <<< ",DATA);size_t i;for(i=0;i<(size_t)LEN;i++)printf("%02X ",((uint8_t*)DATA)[i]);printf(">>>\n");}
 #define mempush(DST,SRC,LEN,OFF) {memcpy(DST+OFF,SRC,LEN);OFF+=LEN;}
-#define mempush_(DST,SRC,LEN,OFF) {fprintf(stderr,"%i (%p<%zu<%p@%zu)",__LINE__,DST,LEN,SRC,OFF);memcpy(DST+OFF,SRC,LEN);OFF+=LEN;fprintf(stderr,"\n");}
-#define DBG_(...) 
-#define DBG(...) fprintf(stderr,__VA_ARGS__)
+
 uint32_t crc_tab[256];
 
+uint16_t rle_ptype_short[0x100];
+uint8_t rle_ptype_long[0x10000];
+
 void crc_init(){
-	for(int i = 0; i < 256; i++){
+	int i=0;
+	for(i = 0; i < 256; i++){
 		crc_tab[i] = i << 24;
-		for (int bit = 8; bit > 0; bit--)
+		int bit;
+		for (bit = 8; bit > 0; bit--)
 			crc_tab[i] = (crc_tab[i] << 1) ^ ((crc_tab[i] & (1 << 31)) ? RLE_CRC_POLY : 0);
 	}
 }
 
 uint32_t crc_compute(uint8_t*buffer, size_t size, uint32_t accu){
-	for(size_t byte = 0; byte < size; byte++)
+	size_t byte;
+	for(byte = 0; byte < size; byte++)
 		accu = accu << 8 ^ crc_tab[(accu) >> 24 ^ (buffer[byte])];
 	return accu;
 }
@@ -29,8 +32,7 @@ uint32_t crc(uint8_t*buffer, size_t size){
 	return crc_compute(buffer, size, RLE_CRC_INIT);
 }
 
-uint16_t rle_ptype_short[0x100];
-uint8_t rle_ptype_long[0x10000];
+void rle_log_null(rle_log_level level, const char *format, ...){}
 
 void rle_init(){
 	/* default uncomp<->compr ptype association */
@@ -50,7 +52,8 @@ void rle_init(){
 	};
 	memset(rle_ptype_short,~0,sizeof(rle_ptype_short));
 	memset(rle_ptype_long,~0,sizeof(rle_ptype_long));
-	for(size_t i=0;i<sizeof(comptypes)/sizeof(*comptypes);i++){
+	size_t i;
+	for(i=0; i<sizeof(comptypes)/sizeof(*comptypes); i++){
 		rle_ptype_short[comptypes[i].compr]=comptypes[i].full;
 		rle_ptype_long[comptypes[i].full]=comptypes[i].compr;
 	}
@@ -62,6 +65,8 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 	/* TODO: find a way to specify each PPDU label*/
 	size_t ppdu_label_size=0;
 	uint8_t ppdu_label_byte[32];
+	if(profile->log == NULL)
+		profile->log = rle_log_null;
 	/* set the fpdu_max_size to the max if none given */
 	if(profile->fpdu_max_size == 0){
 		profile->fpdu_max_size=RLE_FPDU_SIZE_MAX;
@@ -79,7 +84,7 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 		**/
 		if ((sdu->_.ptype_suppr == false) && (sdu->_.header_size == 0)) {
 			if(sdu->size > RLE_SDU_SIZE_MAX){
-				printf("sdu size too big\n");
+				profile->log(RLE_LOG_DBG,"sdu size too big\n");
 				sdu = next_sdu(RLE_ITERATOR_NEXT);
 				return -1;
 			}
@@ -120,7 +125,7 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 		* Fit current ALPDU into FPDU using PPDU
 		*/
 		if(fpdu->size > profile->fpdu_max_size){
-			fprintf(stderr,"given fpdu size(%zu) is larger that profile max (%zu)\n",fpdu->size, profile->fpdu_max_size);
+			profile->log(RLE_LOG_DBG,"given fpdu size(%zu) is larger that profile max (%zu)\n",fpdu->size, profile->fpdu_max_size);
 			return -1;
 		}
 		size_t fpdu_remaining_size = profile->fpdu_max_size - (profile->use_frame_protection?RLE_FPDU_PROT_SIZE:0) - RLE_FPDU_LABEL_SIZE - fpdu->size - RLE_FPDU_PROT_SIZE;
@@ -177,6 +182,8 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 }
 
 int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sdu next_sdu){
+	if(profile->log == NULL)
+		profile->log = rle_log_null;
 	size_t ppdu_label_size=0;
 	uint8_t ppdu_label_byte[32];
 	rle_sdu_t*sdu = next_sdu(RLE_ITERATOR_FIRST);
@@ -186,7 +193,6 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 		uint16_t hdr_int = *(uint16_t*)(fpdu->data+fpdu_offset);
 		/* is this FPDU too small to hold some data ? or have an (impossible) 0-sized CONT is in fact... padding !*/
 		if((profile->fpdu_max_size - fpdu_offset < sizeof(ppdu_header_t) + ppdu_label_size) || (hdr_int == 0)){
-			//DBG(",");//fprintf(stderr,"Exausted FPDU: %zu/%zu (hdr:%04x)\n", fpdu_offset, profile->fpdu_max_size,hdr_int);
 			fpdu = next_fpdu(RLE_ITERATOR_NEXT);
 			fpdu_offset = RLE_FPDU_LABEL_SIZE+(profile->use_eplh_map?sizeof(fpdu_header_t):0);
 			continue;
@@ -213,15 +219,15 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 		}
 		memcpy(sdu->_header + sdu->_.alpdu_sent, &(fpdu->data[fpdu_offset]), ppdu_hdr->ppdu_length);
 		sdu->_.alpdu_sent += ppdu_hdr->ppdu_length;
-		DBG("%c%02zu","CSEF"[ppdu_hdr->start_indicator|ppdu_hdr->end_indicator<<1],ppdu_hdr->ppdu_length);
+		profile->log(RLE_LOG_DBG,"%c%02zu","CSEF"[ppdu_hdr->start_indicator|ppdu_hdr->end_indicator<<1],ppdu_hdr->ppdu_length);
 		fpdu_offset+=ppdu_hdr->ppdu_length;
 		if(ppdu_hdr->end_indicator){
 			/* Received FPDUs doesn not match the size announced by the START FPDU*/
 			if(sdu->_.alpdu_sent!= sdu->size){
-				/*DBG("(sum:%zu != expect:%zu)\n", sdu->_.alpdu_sent, sdu->size);*/
+				/*profile->log(RLE_LOG_DBG,"(sum:%zu != expect:%zu)\n", sdu->_.alpdu_sent, sdu->size);*/
 				/*TODO: what should we do ...? reset current SDU and continue */
 			}
-			DBG("\n");
+			profile->log(RLE_LOG_DBG,"\n");
 			/* update header attribut */
 			uint8_t*ptype=NULL;
 			if(sdu->_.ptype_suppr){
@@ -231,7 +237,7 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 			}else{
 				sdu->_.header_size += sizeof(sdu->protocol_type = *((uint16_t*)(sdu->_header+sdu->_.header_size)));
 			}
-			sdu->_.header_size += 0;//TODO:alpdu_label_size;
+			sdu->_.header_size += 0;/*TODO:alpdu_label_size*/
 			if(ptype!=NULL && *ptype==0xFF){
 				sdu->_.header_size += sizeof(sdu->protocol_type = *((uint16_t*)(sdu->_header+sdu->_.header_size)));
 			}
@@ -244,13 +250,13 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 					sdu->size -= (sdu->_.footer_size = sizeof(uint32_t));
 					uint32_t prot_crc = *(uint32_t*)(sdu->recv_data+sdu->size);
 					if(prot_crc != crc(sdu->recv_data,sdu->size)){
-						DBG("invalid CRC (expect:%08X got:%08X) \n",prot_crc,crc(sdu->recv_data,sdu->size));
+						profile->log(RLE_LOG_DBG,"invalid CRC (expect:%08X got:%08X) \n",prot_crc,crc(sdu->recv_data,sdu->size));
 					}
 				}else{
 					sdu->size -= (sdu->_.footer_size = sizeof(uint8_t));
 					uint8_t prot_seq = *(uint8_t*)(sdu->recv_data+sdu->size);
 					if(prot_seq != profile->alpdu_seq_recv[sdu->label_type]++){
-						DBG("unordered sequence ! \n");
+						profile->log(RLE_LOG_DBG,"unordered sequence ! \n");
 					}
 				}
 			}
@@ -260,109 +266,3 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 	}
 	return 0;
 }
-
-#ifndef NOMAIN
-#include <stdio.h>
-
-#define CONTENT "l'essentiel est invisible pour les yeux"
-#define MAX_GENERATED_SDU 5
-rle_sdu_t*make_sdu(rle_iterator_step step){
-	static size_t make_sdu_nb;
-	static rle_sdu_t curr_sdu = {size:sizeof(CONTENT),data:CONTENT};
-
-	if(step == RLE_ITERATOR_FIRST){
-		make_sdu_nb = 0;
-	}
-	curr_sdu.use_crc = make_sdu_nb&1;
-	curr_sdu.protocol_type = ((uint16_t[]){0,1,0x0800,0x42})[make_sdu_nb&2];
-	memset(&curr_sdu._,0,sizeof(curr_sdu._));
-	return (make_sdu_nb++<MAX_GENERATED_SDU-1)?&curr_sdu:NULL;
-}
-rle_sdu_t*make_sdu_big(rle_iterator_step step){
-	static rle_sdu_t big_sdu = {size:RLE_SDU_SIZE_MAX+1,data:CONTENT};
-	return &big_sdu;
-}
-
-/* shared FPDU list between save_fpdu/load_fpdu*/
-rle_fpdu_t saved_fpdu[MAX_GENERATED_SDU*10]={};
-size_t saved_fpdu_nb;
-rle_fpdu_t*save_fpdu(rle_iterator_step step){
-	if(step == RLE_ITERATOR_FIRST){
-		saved_fpdu_nb = 0;
-	}
-	return (saved_fpdu_nb<MAX_GENERATED_SDU*10-1)?&saved_fpdu[saved_fpdu_nb++]:NULL;
-}
-rle_fpdu_t*load_fpdu(rle_iterator_step step){
-	static size_t loaded_fpdu_nb;
-	if(step == RLE_ITERATOR_FIRST){
-		loaded_fpdu_nb = 0;
-	}
-	if(loaded_fpdu_nb<saved_fpdu_nb){
-		rle_fpdu_t*ret = &saved_fpdu[loaded_fpdu_nb];
-		loaded_fpdu_nb++;
-		return ret;
-	}
-	return NULL;
-}
-
-bool diff_sdu_found;
-rle_sdu_t*diff_sdu(rle_iterator_step step){
-	static rle_sdu_t diffed_sdu;
-	if(step == RLE_ITERATOR_NEXT){
-		bool diff = memcmp(CONTENT,diffed_sdu.recv_data,diffed_sdu.size);
-		diff_sdu_found |= diff;
-		if(diff){
-			DUMP(diffed_sdu.recv_data,diffed_sdu.size)
-			DUMP(CONTENT,diffed_sdu.size)
-		}
-	}
-	memset(&diffed_sdu._,0,sizeof(diffed_sdu._));
-	return &diffed_sdu;
-}
-
-int main(){
-	#define CHECK(msg, cond) if(!(cond)){printf(msg "\n");failed=true;}
-	#define BUILD_CHECK(condition) ((void)sizeof(char[1-2*!(condition)]))
-
-	bool failed = false;
-	/* init */
-	rle_init();
-
-	/* ptype resolving */
-	CHECK("short->long association", rle_ptype_short[0x0D] == 0x0800);
-	CHECK("long->short association", rle_ptype_long[0x0800] == 0x0D);
-	CHECK("Unknown long value", rle_ptype_long[1234] == 0xFF);
-	CHECK("Unknown short value", rle_ptype_short[123] == 0xFFFF);
-
-	CHECK("CRC self test", crc((uint8_t*)"123456789",9) == RLE_CRC_CHECK);
-	/* compilation check */
-	BUILD_CHECK(sizeof(ppdu_header_t) == 2);
-	BUILD_CHECK(sizeof(ppdu_start_header_t) == 2);
-	BUILD_CHECK(sizeof(ppdu_cont_header_t) == 2);
-	BUILD_CHECK(sizeof(ppdu_end_header_t) == 2);
-	BUILD_CHECK(sizeof(ppdu_full_header_t) == 2);
-	BUILD_CHECK(sizeof(ppdu_start2_header_t) == 2);
-	BUILD_CHECK(sizeof(fpdu_header_t) == 1);
-	
-	rle_profile profile = {};
-	profile.fpdu_max_size=RLE_FPDU_SIZE_MAX+1;
-	CHECK("encap fpdu too big", rle_encap(&profile, make_sdu, save_fpdu) < 0);
-	profile.fpdu_max_size=sizeof(ppdu_start_header_t) /*- ppdu_label_size*/ - RLE_FPDU_LABEL_SIZE -1;
-	CHECK("encap fpdu too small", rle_encap(&profile, make_sdu, save_fpdu) < 0);
-	profile.fpdu_max_size=0;//will use default (max) value
-	CHECK("encap sdu too big", rle_encap(&profile, make_sdu_big, save_fpdu) < 0);
-	
-	
-	/* {en,de}cap at multiple FPDU size */
-	for(int i=0;i<2;i++){
-		memset(saved_fpdu,0,sizeof(saved_fpdu));
-		profile.fpdu_max_size=(i+1)*40;
-		DBG("<frag=%zu>\n",profile.fpdu_max_size);
-		CHECK("encap", rle_encap(&profile, make_sdu, save_fpdu) == 0);
-		CHECK("decap", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
-		CHECK("nodiff",  !diff_sdu_found);
-	}
-	return failed;
-	#undef CHECK
-}
-#endif
