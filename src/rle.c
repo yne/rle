@@ -65,8 +65,9 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 	/* TODO: find a way to specify each PPDU label*/
 	size_t ppdu_label_size=0;
 	uint8_t ppdu_label_byte[32];
-	if(profile->log == NULL)
-		profile->log = rle_log_null;
+	rle_log log = rle_log_null;
+	if(profile->log != NULL)
+		log = profile->log;
 	/* set the fpdu_max_size to the max if none given */
 	if(profile->fpdu_max_size == 0){
 		profile->fpdu_max_size=RLE_FPDU_SIZE_MAX;
@@ -84,7 +85,7 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 		**/
 		if ((sdu->_.ptype_suppr == false) && (sdu->_.header_size == 0)) {
 			if(sdu->size > RLE_SDU_SIZE_MAX){
-				profile->log(RLE_LOG_DBG,"sdu size too big\n");
+				log(RLE_LOG_DBG,"sdu size too big\n");
 				sdu = next_sdu(RLE_ITERATOR_NEXT);
 				return -1;
 			}
@@ -125,7 +126,7 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 		* Fit current ALPDU into FPDU using PPDU
 		*/
 		if(fpdu->size > profile->fpdu_max_size){
-			profile->log(RLE_LOG_DBG,"given fpdu size(%zu) is larger that profile max (%zu)\n",fpdu->size, profile->fpdu_max_size);
+			log(RLE_LOG_DBG,"given fpdu size(%zu) is larger that profile max (%zu)\n",fpdu->size, profile->fpdu_max_size);
 			return -1;
 		}
 		size_t fpdu_remaining_size = profile->fpdu_max_size - (profile->use_frame_protection?RLE_FPDU_PROT_SIZE:0) - RLE_FPDU_LABEL_SIZE - fpdu->size - RLE_FPDU_PROT_SIZE;
@@ -182,8 +183,9 @@ int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu
 }
 
 int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sdu next_sdu){
-	if(profile->log == NULL)
-		profile->log = rle_log_null;
+	rle_log log = rle_log_null;
+	if(profile->log != NULL)
+		log = profile->log;
 	size_t ppdu_label_size=0;
 	uint8_t ppdu_label_byte[32];
 	rle_sdu_t*sdu = next_sdu(RLE_ITERATOR_FIRST);
@@ -219,15 +221,15 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 		}
 		memcpy(sdu->_header + sdu->_.alpdu_sent, &(fpdu->data[fpdu_offset]), ppdu_hdr->ppdu_length);
 		sdu->_.alpdu_sent += ppdu_hdr->ppdu_length;
-		profile->log(RLE_LOG_DBG,"%c%02zu","CSEF"[ppdu_hdr->start_indicator|ppdu_hdr->end_indicator<<1],ppdu_hdr->ppdu_length);
+		log(RLE_LOG_DBG,"%c%02zu","CSEF"[ppdu_hdr->start_indicator|ppdu_hdr->end_indicator<<1],ppdu_hdr->ppdu_length);
 		fpdu_offset+=ppdu_hdr->ppdu_length;
 		if(ppdu_hdr->end_indicator){
 			/* Received FPDUs doesn not match the size announced by the START FPDU*/
 			if(sdu->_.alpdu_sent!= sdu->size){
-				/*profile->log(RLE_LOG_DBG,"(sum:%zu != expect:%zu)\n", sdu->_.alpdu_sent, sdu->size);*/
+				/*log(RLE_LOG_DBG,"(sum:%zu != expect:%zu)\n", sdu->_.alpdu_sent, sdu->size);*/
 				/*TODO: what should we do ...? reset current SDU and continue */
 			}
-			profile->log(RLE_LOG_DBG,"\n");
+			log(RLE_LOG_DBG,"\n");
 			/* update header attribut */
 			uint8_t*ptype=NULL;
 			if(sdu->_.ptype_suppr){
@@ -250,13 +252,13 @@ int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sd
 					sdu->size -= (sdu->_.footer_size = sizeof(uint32_t));
 					uint32_t prot_crc = *(uint32_t*)(sdu->recv_data+sdu->size);
 					if(prot_crc != crc(sdu->recv_data,sdu->size)){
-						profile->log(RLE_LOG_DBG,"invalid CRC (expect:%08X got:%08X) \n",prot_crc,crc(sdu->recv_data,sdu->size));
+						log(RLE_LOG_DBG,"invalid CRC (expect:%08X got:%08X) \n",prot_crc,crc(sdu->recv_data,sdu->size));
 					}
 				}else{
 					sdu->size -= (sdu->_.footer_size = sizeof(uint8_t));
 					uint8_t prot_seq = *(uint8_t*)(sdu->recv_data+sdu->size);
 					if(prot_seq != profile->alpdu_seq_recv[sdu->label_type]++){
-						profile->log(RLE_LOG_DBG,"unordered sequence ! \n");
+						log(RLE_LOG_DBG,"unordered sequence ! \n");
 					}
 				}
 			}

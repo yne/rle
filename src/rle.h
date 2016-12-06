@@ -90,8 +90,8 @@ typedef enum{
 typedef rle_fpdu_t*(*rle_iterator_fpdu)(rle_iterator_step);
 typedef rle_sdu_t *(*rle_iterator_sdu )(rle_iterator_step);
 
-int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu next_fpdu);
-int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sdu next_sdu);
+extern int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu next_fpdu);
+extern int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sdu next_sdu);
 
 /* Internal structs */
 

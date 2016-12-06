@@ -109,7 +109,7 @@ int main(){
 	for(i=0;i<2;i++){
 		memset(saved_fpdu,0,sizeof(saved_fpdu));
 		profile.fpdu_max_size=(i+1)*40;
-		profile.log(RLE_LOG_DBG,"<frag=%zu>\n",profile.fpdu_max_size);
+		fprintf(stderr,"<frag=%zu>\n",profile.fpdu_max_size);
 		CHECK("encap SDU into FPDU", rle_encap(&profile, make_sdu, save_fpdu) == 0);
 		CHECK("decap FPDU into SDU", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
 		CHECK("compare original<->decapsulated",  !diff_sdu_found);

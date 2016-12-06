@@ -95,8 +95,8 @@ cc tests.c
 ## Examples
 
 ```
-cc tests.c
-./a.out
+cc -L. -lrle example.c -o example
+yes sir | ./example e | ./example d
 ```
 
 # Documentation
