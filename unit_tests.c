@@ -5,7 +5,7 @@
 #include "rle.c"
 
 #define DUMP(DATA,LEN) {printf("%p <<< ",DATA);size_t i;for(i=0;i<(size_t)LEN;i++)printf("%02X ",((uint8_t*)DATA)[i]);printf(">>>\n");}
-
+#define FPDU_LABEL_SIZE 8
 #define CONTENT "l'essentiel est invisible pour les yeux"
 #define MAX_GENERATED_SDU 5
 
@@ -98,18 +98,16 @@ int main(){
 	rle_profile profile = {/*log:log_stderr*/};
 	profile.fpdu_max_size=RLE_FPDU_SIZE_MAX+1;
 	CHECK("Encap a too big fpdu", rle_encap(&profile, make_sdu, save_fpdu) < 0);
-	profile.fpdu_max_size=sizeof(ppdu_start_header_t) /*- ppdu_label_size*/ - RLE_FPDU_LABEL_SIZE -1;
+	profile.fpdu_max_size=sizeof(ppdu_start_header_t) /*- ppdu_label_size*/ - FPDU_LABEL_SIZE -1;
 	CHECK("Encap a too small fpdu", rle_encap(&profile, make_sdu, save_fpdu) < 0);
 	profile.fpdu_max_size=0;//will use default (max) value
-	CHECK("Encap a too big sdu", rle_encap(&profile, make_sdu_big, save_fpdu) < 0);
-	
 	
 	/* {en,de}cap at multiple FPDU size */
 	int i;
 	for(i=0;i<2;i++){
 		memset(saved_fpdu,0,sizeof(saved_fpdu));
 		profile.fpdu_max_size=(i+1)*40;
-		fprintf(stderr,"<frag=%zu>\n",profile.fpdu_max_size);
+		//fprintf(stderr,"<frag=%zu>\n",profile.fpdu_max_size);
 		CHECK("encap SDU into FPDU", rle_encap(&profile, make_sdu, save_fpdu) == 0);
 		CHECK("decap FPDU into SDU", rle_decap(&profile, load_fpdu, diff_sdu) == 0);
 		CHECK("compare original<->decapsulated",  !diff_sdu_found);

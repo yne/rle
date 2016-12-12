@@ -1,10 +1,10 @@
 language: c
 compiler: gcc
 script:
-  - $CC -c src/rle.c -o rle.o
+  - $CC -c rle.c -o rle.o
   - ar rcs librle.a rle.o
-  - $CC -coverage src/tests.c
-  - time ./a.out
-  - gcov src/rle.c
+  - $CC -coverage unit_tests.c -o unit_tests
+  - time ./unit_tests
+  - gcov rle.c
 after_success:
   - bash <(curl -s https://codecov.io/bash)

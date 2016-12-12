@@ -18,11 +18,13 @@
 #define RLE_ALPDU_FOOTER_MAX 4
 #define RLE_ALPDU_FOOTER_MIN 0
 #define RLE_SDU_SIZE_MAX (RLE_ALPDU_SIZE_MAX-RLE_ALPDU_HEADER_MIN-RLE_ALPDU_FOOTER_MIN)
+#define RLE_PPDU_LABEL_MAX 15
+#define RLE_PPDU_LABEL_MIN 0
 #define RLE_FPDU_PADDING 0x00
 #define RLE_FPDU_SIZE_MAX 599 /* User defined */
-#define RLE_FPDU_LABEL_SIZE 8 /* User defined */
-#define RLE_FPDU_PROT_SIZE 4 /* User defined */
-#define RLE_FPDU_DATA_SIZE (RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE)
+//#define RLE_FPDU_LABEL_SIZE 8 /* User defined */
+//#define RLE_FPDU_PROT_SIZE 4 /* User defined */
+//#define RLE_FPDU_DATA_SIZE (RLE_FPDU_SIZE_MAX-RLE_FPDU_LABEL_SIZE-RLE_FPDU_PROT_SIZE)
 
 typedef enum{
 	RLE_LOG_CRI,
@@ -47,7 +49,8 @@ typedef struct{
 	uint8_t   alpdu_seq_send[RLE_ALPDU_FRAGID_COUNT];/*TODO:use specific structure*/
 	uint8_t   alpdu_seq_recv[RLE_ALPDU_FRAGID_COUNT];/*TODO:use specific structure*/
 	size_t    fpdu_max_size;
-	bool      use_frame_protection;
+	size_t    fpdu_pro_size;
+	size_t    fpdu_label_size;
 	bool      use_eplh_map;
 /* General */
 	rle_log   log;
@@ -67,7 +70,7 @@ typedef struct{
 	uint8_t   _header[RLE_ALPDU_HEADER_MAX];
 	uint8_t   data[RLE_SDU_SIZE_MAX];
 	uint8_t   _footer[RLE_ALPDU_FOOTER_MAX];
-	struct    {/* internal attributs */
+	struct    {/* internal attributes */
 	  size_t  header_size;
 	  size_t  footer_size;
 	  bool    ptype_suppr;
@@ -78,7 +81,7 @@ typedef struct{
 
 typedef struct{
 	size_t    size;
-	uint8_t   data[RLE_FPDU_LABEL_SIZE+RLE_FPDU_DATA_SIZE+RLE_FPDU_PROT_SIZE];
+	uint8_t   data[RLE_FPDU_SIZE_MAX];
 }rle_fpdu_t;
 
 typedef enum{
@@ -90,6 +93,7 @@ typedef enum{
 typedef rle_fpdu_t*(*rle_iterator_fpdu)(rle_iterator_step);
 typedef rle_sdu_t *(*rle_iterator_sdu )(rle_iterator_step);
 
+extern void rle_init();
 extern int rle_encap(rle_profile* profile, rle_iterator_sdu next_sdu, rle_iterator_fpdu next_fpdu);
 extern int rle_decap(rle_profile* profile, rle_iterator_fpdu next_fpdu, rle_iterator_sdu next_sdu);
 
